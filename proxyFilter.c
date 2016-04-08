@@ -17,10 +17,10 @@
 #include <pthread.h>
 
 void *connection_handler(void*);
-	int MAX_SIZE = 100;
+  
 
     int main(int argc, char* argv[]){
-        
+        int MAX_SIZE = 100;
         short portNum;
         int socket_desc, ssocket;
         struct sockaddr_in serverSocket;
@@ -51,21 +51,27 @@ void *connection_handler(void*);
     int BLsize = 0;
     
     char *fileName = argv[2];
-    file = fopen(fileName,"r");
-    if (!file) {
+    file = fopen(fileName,"r+");
+    if (file) == 0) {
         puts("No file detected");      
+        exit(1);
     }
 
-    int counter = 0; 
+    int counter; 
+    puts("hi");
+
     while(fgets(BLBufferSize, MAX_SIZE, file) != NULL){
+    puts("There");
+
         strtok(BLBufferSize, "\n");
         blackList[counter] = (char*) malloc(MAX_SIZE);
         strcpy(blackList[counter], BLBufferSize);
         BLBufferSize[strlen(BLBufferSize)-1]='\0';
         counter++;
-	}
+  }
     BLsize = counter; 
     fclose(file);
+    puts("hi");
     
     //Associate server with local address
     if(bind(socket_desc, (struct sockaddr *)&serverSocket, sizeof(serverSocket)) < 0){
@@ -79,20 +85,20 @@ void *connection_handler(void*);
     //Accept
     puts("Connecting...");
     int c = sizeof(struct sockaddr_in);
-       
+       puts("hi");
     while((ssocket = accept(socket_desc, (struct sockaddr *) &clientSocket,(socklen_t*)&c))){
 
-       	int flag = 0; 
-      	char buf[4096];
-       	char protocol[512];
+        int flag = 0; 
+        char buf[4096];
+        char protocol[256];
         int defaultPort = 80; 
         char ports[16]; 
-        char remoteURL [512]; 
-        char remoteURLPath [512];
-        char hostSuffix [512];
+        char remoteURL [256]; 
+        char remoteURLPath [256];
+        char hostSuffix [256];
         struct sockaddr_in hostSocket;
         int remoteSocket;  
-        char reqType[512];    
+        char reqType[256];    
         char url[4096];
         char parseURL[4096]; 
  
@@ -102,7 +108,7 @@ void *connection_handler(void*);
         recv(ssocket, buf, 4096, flag);
         sscanf(buf, "%s %s %s %s", reqType, url, protocol, hostSuffix);
  
-		remoteSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    remoteSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         hostSocket.sin_port = htons(defaultPort);
         hostSocket.sin_addr.s_addr = INADDR_ANY;
         hostSocket.sin_family = AF_INET;
@@ -146,13 +152,13 @@ void *connection_handler(void*);
             {
               sprintf(remoteURLPath, "/");
             }
-		 
-   int count;
+     
+   int count = 0;
    while(count < BLsize){
-   	blackList[count][strlen(blackList[count])-1]='\0';
-   			if(strstr(blackList[count]) != NULL){
-            	sprintf(BLBufferSize,"403 List check \n%s", blackList[count]);
-              	send(ssocket, BLBufferSize, strlen(BLBufferSize), 0);
+    blackList[count][strlen(blackList[count])-1]='\0';
+        if(strstr(blackList[count], url) != NULL){
+              sprintf(BLBufferSize,"403 List check \n%s", blackList[count]);
+                send(ssocket, BLBufferSize, strlen(BLBufferSize), 0);
                 exit(1); 
             }
         count++; 
@@ -185,14 +191,14 @@ if(ssocket < 0){
   exit(1);
 }
 
-exit(1);
+return 0;
 }
 
 void *connection_handler(void* socket_desc){
     int ssocket2 = *(int*) socket_desc;
     char *msg;
     
-    msg = "connection handler initiated\n";
+    msg = "Handling connection..\n";
     write(ssocket2, msg, strlen(msg));
     
     free(socket_desc);
