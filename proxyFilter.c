@@ -51,10 +51,9 @@ void *connection_handler(void*);
     int BLsize = 0;
     
     char *fileName = argv[2];
-    file = fopen(fileName,"r+");
-    if (file) == 0) {
+    file = fopen(fileName,"r");
+    if (!file) {
         puts("No file detected");      
-        exit(1);
     }
 
     int counter; 
