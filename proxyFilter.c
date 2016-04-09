@@ -253,15 +253,18 @@ int main(int argc, char* argv[]){
   		    exit(0);
   	    }
   	   
-  	    int response_code;
+  	    
         do{
         	bzero((char*)buf,4096);
         	req = recv(remoteSock, buf, 4096, 0);
         	if(req > 0 ){
-        	   float ver;
-                    sscanf(buf, "HTTP/%f %d", &ver, &response_code);
+        	   
                     recv(remoteSock, buf, strlen(buf), flags);
-        	}else{ perror("Connection has closed");}
+        	} else { 
+        		perror("Connection has closed");
+        	  	exit(1);
+        	  }
+
         }while(req > 0);
         
         

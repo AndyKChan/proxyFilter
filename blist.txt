@@ -2,4 +2,3 @@ SFU
 Toronto
 uvic.ca
 sfu
-ubc
