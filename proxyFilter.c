@@ -91,7 +91,7 @@ int main(int argc, char* argv[]){
     }
 
     break; 
-}
+	}
 
 freeaddrinfo(servinfo); // all done with this structure
 
@@ -152,73 +152,66 @@ if (p == NULL) {
             s, sizeof s);
         printf("Server: got connection from %s\n", s);
 
-    
-
-        int flag = 0; 
-        char buf[4096];
-        char protocol[256];
-        int defaultPort = 80; 
-        char ports[16]; 
-        char remoteURL [256]; 
-        char remoteURLPath [256];
-        char hostSuffix [256];
-        struct sockaddr_in hostSocket; 
-        int remoteSocket;  
-        char reqType[256];    
-        char url[4096];
-        char parseURL[4096]; 
- 
         char* msg = "Proxy Connected. \n";
         write(newSocket,msg,strlen(msg));
-       
-        recv(newSocket, buf, 4096, flag);
-        sscanf(buf, "%s %s %s %s", reqType, url, protocol, hostSuffix);
-		strcpy(parseURL, url);
-        printf("%s\n", parseURL);
- 
- 		remoteSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        hostSocket.sin_port = htons(defaultPort);
-        hostSocket.sin_addr.s_addr = INADDR_ANY;
-        hostSocket.sin_family = AF_INET;
-     
 
-        char *PathOfInput = &(parseURL[0]);
-        char *hostName; 
-        int i; 
-        //find http:// section in pathofinput and increment
-        if(strstr(PathOfInput, "http://") != NULL)
+   		char buf[4096];
+   		char requestType[256];    
+		char url[4096], urlHost[256], urlPath[256];
+		char protocol[256];
+		char hostSuffix [256];
+
+        int flag = 0; 
+        int port = 80; 
+
+        
+        struct sockaddr_in hostSocket; 
+        int remoteSocket;  
+        char parseURL[4096], hostName[1024],statedPort[16]; //to change
+        char* URLfrag = NULL; //to change
+
+		char ports[16]; 
+        char remoteURL [256]; 
+        char remoteURLPath [256];
+        //get request
+        recv(newSocket, buf, 4096, 0);
+		sscanf(buf, "%s %s %s %s", requestType, url, protocol, hostSuffix);
+		 if(url[0] == '/')
         {
-          PathOfInput = &(parseURL[6]);
-          i += 6;   
+            strcpy(buf, &url[1]);
+            strcpy(url, buf);
+        }
+        
+        if((strncmp(requestType, "GET", 3) != 0)){
+        	sprintf(buf, "405: GET REQUEST ONLY");
+        	send(newSocket, buf, strlen(buf) , 0);
+        	exit(1);
         }
 
-        hostName = strtok(PathOfInput, "/");
+        strcpy(parseURL, url); 	
+        char *ppath = &(parseURL[0]);
+ 		
+        int inc; 
+        //find http:// section in ppath and increment
+        if(strstr(ppath, "http://") != NULL){
+          ppath = &(parseURL[6]);
+          inc += 6;   
+        }
+        URLfrag = strtok(ppath, "/");
+        sprintf(hostName, "%s", URLfrag);
 
-        printf("Host name: %s\n" , hostName);
-
-        if(strstr(hostName, ":") != NULL)
-        {
-          hostName = strtok(hostName, ":");
-          
-          sprintf(remoteURL, "%s", hostName);
-          hostName = strtok(NULL, ":");
-          
-          sprintf(ports, "%s", hostName);
-          defaultPort = atoi(ports);
-    
-      } else {
-             sprintf(remoteURL, "%s", hostName);
-      }
-
-       
-          PathOfInput = &(url[strlen(remoteURL) + i]);
-          sprintf(remoteURLPath, "%s", PathOfInput);
-            
-        if(strcmp(remoteURLPath, "") == 0)
-            {
-              sprintf(remoteURLPath, "/");
-            }
-     
+        //check if port stated
+        if(strstr(hostName, ":") != NULL){
+        	URLfrag = strtok(hostName, ":");
+        	sprintf(urlHost, "%s", URLfrag);
+			URLfrag = strtok(NULL, ":");
+			sprintf(statedPort, "%s", URLfrag);
+			port = atoi(statedPort);
+		} else {
+		sprintf(urlHost, "%s", hostName);
+		}
+	
+	     
    int count = 0;
    while(count < BLsize){
     blackList[count][strlen(blackList[count])-1]='\0';
