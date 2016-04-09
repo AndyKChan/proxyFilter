@@ -29,15 +29,7 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-void sigchld_handler(int s)
-{
-    // waitpid() might overwrite errno, so we save and restore it:
-    int saved_errno = errno;
 
-    while(waitpid(-1, NULL, WNOHANG) > 0);
-
-    errno = saved_errno;
-}
 
 
 int main(int argc, char* argv[]){
@@ -49,7 +41,7 @@ int main(int argc, char* argv[]){
     FILE *file;
     int flag = 1;
     struct addrinfo hints, *servinfo, *p, *res;
-    struct sigaction sa;
+    
     char s[INET6_ADDRSTRLEN];
     
     //check # args
@@ -106,13 +98,7 @@ if (p == NULL) {
         exit(1);
     }
 
-     sa.sa_handler = sigchld_handler; // reap all dead processes
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(1);
-    }
+
    
    puts("Server: Connecting...");
     
@@ -189,15 +175,16 @@ if (p == NULL) {
         }
 
         strcpy(parseURL, url); 	
-        char *ppath = &(parseURL[0]);
+        char *inputPath = &(parseURL[0]);
  		
         int inc; 
-        //find http:// section in ppath and increment
-        if(strstr(ppath, "http://") != NULL){
-          ppath = &(parseURL[6]);
+        //find http:// section in inputPath and increment
+        if(strstr(inputPath, "http://") != NULL){
+          inputPath = &(parseURL[6]);
           inc += 6;   
         }
-        URLfrag = strtok(ppath, "/");
+        //get hostName
+        URLfrag = strtok(inputPath, "/");
         sprintf(hostName, "%s", URLfrag);
 
         //check if port stated
@@ -210,8 +197,15 @@ if (p == NULL) {
 		} else {
 		sprintf(urlHost, "%s", hostName);
 		}
+
+		// inputPath = &(url[strlen(hostName) + inc]);
+		// sprintf(urlPath, "%s", inputPath);
+		// if(strcmp(urlPath, "") == 0)
+		// {
+		// 	sprintf(urlPath, "/");
+		// }
 	
-	     
+		//blacklist portion
    int count = 0;
    while(count < BLsize){
     blackList[count][strlen(blackList[count])-1]='\0';
