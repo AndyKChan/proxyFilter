@@ -127,6 +127,8 @@ if (p == NULL) {
     fclose(file);
     
     while(1){
+    	struct sockaddr_in hostAddr;
+    	int req;
     	int sin_size = sizeof their_addr;
     	newSocket = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
     	if(newSocket == -1) {
@@ -142,19 +144,19 @@ if (p == NULL) {
         write(newSocket,msg,strlen(msg));
 
    		char buf[4096];
+   		bzero((char*)buf, 4096);
    		char requestType[256];    
 		char url[4096], urlHost[256], urlPath[256];
 		char protocol[256];
 		char hostSuffix [256];
 
-        int flag = 0; 
+        int flags = 0; 
         int port = 80; 
-
         
         struct sockaddr_in hostSocket; 
-        int remoteSocket;  
-        char parseURL[4096], hostName[1024],statedPort[16]; //to change
-        char* URLfrag = NULL; //to change
+        int remoteSock;  
+        char parseURL[1024], hostName[1024],statedPort[16]; 
+        char* URLfrag = NULL; 
 
 		char ports[16]; 
         char remoteURL [256]; 
@@ -174,36 +176,40 @@ if (p == NULL) {
         	exit(1);
         }
 
-        strcpy(parseURL, url); 	
-        char *inputPath = &(parseURL[0]);
- 		
-        int inc; 
-        //find http:// section in inputPath and increment
-        if(strstr(inputPath, "http://") != NULL){
-          inputPath = &(parseURL[6]);
-          inc += 6;   
-        }
-        //get hostName
-        URLfrag = strtok(inputPath, "/");
-        sprintf(hostName, "%s", URLfrag);
+    
+	
+	int inc = 1;
+	
 
-        //check if port stated
-        if(strstr(hostName, ":") != NULL){
-        	URLfrag = strtok(hostName, ":");
-        	sprintf(urlHost, "%s", URLfrag);
-			URLfrag = strtok(NULL, ":");
-			sprintf(statedPort, "%s", URLfrag);
-			port = atoi(statedPort);
-		} else {
+	strcpy(parseURL, url);
+	char *inputPath = &(parseURL[0]);
+	
+	if(NULL != strstr(inputPath, "http://"))
+	{
+		inputPath = &(parseURL[6]);
+		inc += 6;
+	}
+	
+	URLfrag = strtok(inputPath, "/");
+	sprintf(hostName, "%s", URLfrag);
+	
+	if(NULL != strstr(hostName, ":"))
+	{
+		URLfrag = strtok(hostName, ":");
+		sprintf(urlHost, "%s", URLfrag);
+		URLfrag = strtok(NULL, ":");
+		sprintf(statedPort, "%s", URLfrag);
+		port = atoi(statedPort);
+	} else {
 		sprintf(urlHost, "%s", hostName);
-		}
-
-		// inputPath = &(url[strlen(hostName) + inc]);
-		// sprintf(urlPath, "%s", inputPath);
-		// if(strcmp(urlPath, "") == 0)
-		// {
-		// 	sprintf(urlPath, "/");
-		// }
+	}
+	
+	inputPath = &(url[strlen(urlHost) + inc]);
+	sprintf(urlPath, "%s", inputPath);
+	if(strcmp(urlPath, "") == 0)
+	{
+		sprintf(urlPath, "/");
+	}
 	
 		//blacklist portion
    int count = 0;
@@ -216,36 +222,61 @@ if (p == NULL) {
             }
         count++; 
    }
+   		remoteSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-        if(remoteSocket < 0){
+        if(remoteSock < 0){
           perror("Remote socket failed");  
+          exit(0);
+        }
+        struct hostent *hostPortion;
+          
+        if((hostPortion = gethostbyname(urlHost)) == NULL)
+        {
+            fprintf(stderr, "failed to resolve %s: %s\n", urlHost, strerror(errno));
+            exit(0);
         }
 
-        // if(connect(remoteSocket, get_in_addr(hostSocket), sizeof(struct sockaddr)) < 0)
-        // {
-        //     perror("Remote server failed to connect");
-        //     close(remoteSocket); 
-        //     return 0; 
-        // }
+        bzero((char*)&hostAddr, sizeof(hostAddr));
+        hostAddr.sin_port = htons(port);
+        hostAddr.sin_family = AF_INET;
+        bcopy((char*)hostPortion->h_addr, (char*)&hostAddr.sin_addr.s_addr, hostPortion->h_length);
 
-        sprintf(buf,"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", remoteURLPath, remoteURL);
 
-        int req = send(remoteSocket, buf, strlen(buf), 0);
+        if(connect(remoteSock, (struct sockaddr*)&hostAddr, sizeof(struct sockaddr)) < 0)
+        {
+            perror("Remote server failed to connect");
+            close(newSocket);
+            close(remoteSock); 
+            exit(0);
+        }
+
+     
+sprintf(buf,"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", urlPath, urlHost);
+puts(buf);
+
+        req = send(remoteSock, buf, strlen(buf), flags);
 
         if(req < 0)
         {
             perror("failed to write to remote socket");
+            close(newSocket);
+            close(remoteSock);
+            exit(0);
         }
-
+        
         if (!fork()) { // this is the child process
             close(sockfd); // child doesn't need the listener
             if (send(newSocket, "Hello, world!", 13, 0) == -1)
                 perror("send");
+
             close(newSocket);
             exit(0);
         }
         close(newSocket);
+        close(remoteSock);
+
 	}
+
 	return 0;
 }
        
