@@ -1,286 +1,302 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <stdio.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <pthread.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include "proxyFilter.h"
 
-#define BACKLOG 10 
-void *connection_handler(void*);
+// list of black-listed websites
+char *url_blacklist[100];
+int url_blacklist_len = 0;
+int url_index = 0;
+FILE *filterFile;
+char buf[100];
 
-//gets socket address, IPv4 or IPv6
-void *get_in_addr(struct sockaddr *sa)
+
+int main(int argc, char **argv)
 {
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
+    pid_t chpid;
+    struct sockaddr_in addr_in, cli_addr, serv_addr;
+    struct hostent *hostent;
+    int sockfd, newsockfd;
+    int clilen = sizeof(cli_addr);
+    struct stat st = {0};
+		
+    if(argc != 3)
+    {
+        printf("Using:\n\t%s <port> <filter-list>\n", argv[0]);
+        return -1;
     }
 
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
-
-int main(int argc, char* argv[]){
-    int sockfd, newSocket, status;
-    int MAX_SIZE = 100;
-    short portNum;
-    struct sockaddr_storage their_addr;
-    socklen_t sin_size;
-    FILE *file;
-    int flag = 1;
-    struct addrinfo hints, *servinfo, *p, *res;
+    printf("HTTP Proxy Server now listening on port %i ... \n", atoi(argv[1]));
     
-    char s[INET6_ADDRSTRLEN];
-    
-    //check # args
-    if(argc < 2){
-        puts("Arguments should be more than 2");
-        exit(1);
-    }   
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // Forces IPv6
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-
-    int rv;
-    //NULL for nodename b/c bind fills it in later
-    if((rv = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0){
-    	fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-    	exit(1);
-    }
-
-	//loop through all results and connect to the first we can
-   for(p = servinfo; p != NULL; p = p->ai_next) {
-    if ((sockfd = socket(p->ai_family, p->ai_socktype,
-            p->ai_protocol)) == -1) {
-        perror("socket");
-        continue;
-    }
-
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag,
-                sizeof(int)) == -1) {
-            perror("setsockopt");
-            exit(1);
-    }
-
-    if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-        close(sockfd);
-        perror("bind");
-        continue;
-    }
-
-    break; 
-	}
-
-	freeaddrinfo(servinfo); // all done with this structure
-
-	// looped off the end of the list with no connection
-	if (p == NULL) {
-   	 fprintf(stderr, "failed to connect\n");
-   	 exit(2);
-	}
-
-  	if (listen(sockfd, BACKLOG) == -1) {
-        perror("listen");
-        exit(1);
-    }
- 
-    puts("Server: Connecting...");
-    
-
-    // Initialize blacklist
-    
-    char *blackList[MAX_SIZE];
-    char BLBufferSize[MAX_SIZE]; 
-    int BLsize = 0;
-    
+    //Add filter list to the url_blacklist array.
     char *fileName = argv[2];
-    file = fopen(fileName,"r");
-    if (!file) {
-        puts("No file detected");      
-        exit(1);
+    filterFile =fopen(fileName,"r");
+    if (!filterFile) {
+        printf("Failed to load the filter list, Proxy terminates \n");
+        return 0;
+    }
+    
+    while (fgets(buf,100, filterFile)!=NULL){
+        strtok(buf, "\n");
+        url_blacklist[url_index] = (char*) malloc(100);
+        strcpy(url_blacklist[url_index], buf);
+        url_index += 1;
+    }
+   
+    url_blacklist_len = url_index;
+    fclose(filterFile);
+    // Done for adding filter list
+
+    // checking if the cache directory exists
+    if (stat("./cache/", &st) == -1) {
+        mkdir("./cache/", 0700);
     }
 
-    int counter; 
-    while(fgets(BLBufferSize, MAX_SIZE, file) != NULL){
-        strtok(BLBufferSize, "\n");
-        blackList[counter] = (char*) malloc(MAX_SIZE);
-        strcpy(blackList[counter], BLBufferSize);
-        BLBufferSize[strlen(BLBufferSize)-1]='\0';
-        counter++;
-  }
-    BLsize = counter; 
-    fclose(file);
-    
-    while(1){
-    	struct sockaddr_in hostAddr;
-    	int req;
-    	int sin_size = sizeof their_addr;
-    	newSocket = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
-    	if(newSocket == -1) {
-    		perror("accept");
-    		continue;
-    	}
-    	inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
-        printf("Server: got connection from %s\n", s);
+    bzero((char*)&serv_addr, sizeof(serv_addr));
+    bzero((char*)&cli_addr, sizeof(cli_addr));
 
-        char* msg = "Proxy Connected. \n";
-        write(newSocket,msg,strlen(msg));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(atoi(argv[1]));
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
 
-   		char buf[4096];
-   		bzero((char*)buf, 4096);
-   		char requestType[256];    
-		char url[4096], urlHost[256], urlPath[256];
-		char protocol[256];
-		char hostSuffix [256];
+    // creating the listening socket for our proxy server
+    sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if(sockfd < 0)
+    {
+        perror("failed to initialize socket");
+    }
 
-        int flags = 0; 
-        int port = 80; 
-        
-        struct sockaddr_in hostSocket; 
-        int remoteSock;  
-        int cacheDesc;
-        char parseURL[1024], hostName[1024],statedPort[16]; 
-        char* URLfrag = NULL; 
+    // binding our socket to the given port
+    if(bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    {
+        perror("failed to bind socket");
+    }
 
-		char ports[16]; 
-        char remoteURL [256]; 
-        char remoteURLPath [256];
+    // start listening
+    listen(sockfd, 50);
 
-        //get request
-        recv(newSocket, buf, 4096, 0);
-		sscanf(buf, "%s %s %s %s", requestType, url, protocol, hostSuffix);
-		 if(url[0] == '/')
+accepting:
+    newsockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &clilen);
+
+    if((chpid = fork()) == 0)
+    {
+        struct sockaddr_in host_addr;
+        int i, n;           // loop indices
+        int rsockfd;        // remote socket file descriptor
+        int cfd;            // cache-file file descriptor
+
+        int port = 80;      // default http port - can be overridden
+        char type[256];     // type of request - e.g. GET/POST/HEAD
+        char url[4096];     // url in request - e.g. facebook.com
+        char proto[256];    // protocol ver in request - e.g. HTTP/1.1
+
+        char datetime[256]; // the date-time when we last cached a url
+
+        // break-down of a given url by parse_url function
+        char url_host[256], url_path[256];
+
+        char url_encoded[4096]; // encoded url, used for cahce filenames
+        char filepath[256];     // used for cache file paths
+
+        char *dateptr;      // used to find the date-time in http response
+        char buffer[4096];  // buffer used for send/receive
+        int response_code;  // http response code - e.g. 200, 304, 301
+
+        bzero((char*)buffer, 4096);
+
+        // recieving the http request
+        recv(newsockfd, buffer, 4096, 0);
+
+        // we only care about the first line in request
+        sscanf(buffer, "%s %s %s", type, url, proto);
+
+        // adjusting the url -- some cleanup!
+        if(url[0] == '/')
         {
-            strcpy(buf, &url[1]);
-            strcpy(url, buf);
+            strcpy(buffer, &url[1]);
+            strcpy(url, buffer);
         }
         
-        if((strncmp(requestType, "GET", 3) != 0)){
-        	sprintf(buf, "405: GET REQUEST ONLY");
-        	send(newSocket, buf, strlen(buf) , 0);
-        	exit(1);
+        // Only GET requests are accepted
+        if((strncmp(type , "GET", 3) != 0) || ((strncmp(proto, "HTTP/1.1", 8) != 0)))
+        {
+            // invalid request -- send the following line back to browser
+            sprintf(buffer,"405 : BAD REQUEST\nONLY GET REQUESTS ARE ALLOWED");
+            send(newsockfd, buffer, strlen(buffer), 0);
+            goto end;
         }
 
-    
-	
-		int inc = 1;
-	
+        // Break down the url to know the host and path
+        parse_url(url, url_host, &port, url_path);
+        // encoding the url for later use
+        url_encode(url, url_encoded);
 
-		strcpy(parseURL, url);
-		char *inputPath = &(parseURL[0]);
-	
-		if(NULL != strstr(inputPath, "http://")){
-			inputPath = &(parseURL[6]);
-			inc += 6;
-		}
-	
-		URLfrag = strtok(inputPath, "/");
-		sprintf(hostName, "%s", URLfrag);
-	
-		if(NULL != strstr(hostName, ":")) {
-			URLfrag = strtok(hostName, ":");
-			sprintf(urlHost, "%s", URLfrag);
-			URLfrag = strtok(NULL, ":");
-			sprintf(statedPort, "%s", URLfrag);
-			port = atoi(statedPort);
-		} else {
-			sprintf(urlHost, "%s", hostName);
-		}
-	
-		inputPath = &(url[strlen(urlHost) + inc]);
-		sprintf(urlPath, "%s", inputPath);
-	
-		if(strcmp(urlPath, "") == 0) {
-			sprintf(urlPath, "/");
-		}
-
-		int count;
-   		for(count = 0; count < BLsize; count++) {
-       		if(strstr(url, blackList[count]) != NULL){   
-                sprintf(buf,"403 : URL found in black list, connection closed\n%s", blackList[count]);
-                send(newSocket, buf, strlen(buf), 0);
-                exit(1);
-        	}
-   		}
-   		
-   		remoteSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    	if(remoteSock < 0){
-      		perror("Remote socket failed");  
-     		 exit(0);
-    	}
-    	
-    	struct hostent *hostPortion;
-          
-    	if((hostPortion = gethostbyname(urlHost)) == NULL){
-     		 fprintf(stderr, "Failed to resolve %s: %s\n", urlHost, strerror(errno));
-     		 exit(0);
-    	}
-
-  		 bzero((char*)&hostAddr, sizeof(hostAddr));
-   		 hostAddr.sin_port = htons(port);
-   		 hostAddr.sin_family = AF_INET;
-   		 bcopy((char*)hostPortion->h_addr, (char*)&hostAddr.sin_addr.s_addr, hostPortion->h_length);
-
-   		 if(connect(remoteSock, (struct sockaddr*)&hostAddr, sizeof(struct sockaddr)) < 0){
-    	    perror("Remote server failed to connect");
-   	        close(newSocket);
-       		close(remoteSock); 
-       		exit(0);
-    	 }
-
-     
-		sprintf(buf,"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", urlPath, urlHost);
-		puts(buf);
-
-   		req = send(remoteSock, buf, strlen(buf), flags);
-    
-  	    if(req < 0) {
-     	   perror("failed to write to remote socket");
-    	    close(newSocket);
-    	    close(remoteSock);
-  		    exit(0);
-  	    }
-  	   
-  	    
-        do{
-        	bzero((char*)buf,4096);
-        	req = recv(remoteSock, buf, 4096, 0);
-        	if(req > 0 ){
-        	   
-                    recv(remoteSock, buf, strlen(buf), flags);
-        	} else { 
-        		perror("Connection has closed");
-        	  	exit(1);
-        	  }
-
-        }while(req > 0);
-        
-        
-        if (!fork()) { // this is the child process
-            close(sockfd); // child doesn't need the listener
-            if (send(newSocket, "Hello, world! \n", 13, 0) == -1)
-                perror("send");
-
-            close(newSocket);
-            exit(0);
+        // BLACK LIST CHECK
+        for(i = 0; i < url_blacklist_len; i++)
+        {
+            //printf("url_blacklist[%i]: %s \n", i, url_blacklist[i]);
+            // if url contains the black-listed word
+            if(NULL != strstr(url, url_blacklist[i]))
+            {
+                
+                sprintf(buffer,"403 : BAD REQUEST\nURL FOUND IN BLACKLIST\n%s", url_blacklist[i]);
+                send(newsockfd, buffer, strlen(buffer), 0);
+                goto end;
+            }
         }
-        close(newSocket);
-        close(remoteSock);
+        // Find the ip for the host
+        if((hostent = gethostbyname(url_host)) == NULL)
+        {
+            fprintf(stderr, "failed to resolve %s: %s\n", url_host, strerror(errno));
+            goto end;
+        }
 
-	}
+        bzero((char*)&host_addr, sizeof(host_addr));
+        host_addr.sin_port = htons(port);
+        host_addr.sin_family = AF_INET;
+        bcopy((char*)hostent->h_addr, (char*)&host_addr.sin_addr.s_addr, hostent->h_length);
 
-	return 0;
+        // create a socket to connect to the remote host
+        rsockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+        if(rsockfd < 0)
+        {
+            perror("failed to create remote socket");
+            goto end;
+        }
+
+        // try connecting to the remote host
+        if(connect(rsockfd, (struct sockaddr*)&host_addr, sizeof(struct sockaddr)) < 0)
+        {
+            perror("failed to connect to remote server");
+            goto end;
+        }
+
+        // CACHING CHECK
+        sprintf(filepath, "./cache/%s", url_encoded);
+        if (0 != access(filepath, 0)) {
+            // Don't have any file by this name, request from the remote host
+            sprintf(buffer,"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", url_path, url_host);
+            goto request;
+        }
+
+        // The request has been cached previously
+        // open the file
+        sprintf(filepath, "./cache/%s", url_encoded);
+        cfd = open (filepath, O_RDWR);
+        bzero((char*)buffer, 4096);
+        read(cfd, buffer, 4096);
+        close(cfd);
+
+        // Find the date it was cached
+        dateptr = strstr(buffer, "Date:");
+        if(NULL != dateptr)
+        {
+            // response has a Date field
+            bzero((char*)datetime, 256);
+            strncpy(datetime, &dateptr[6], 29);
+
+            // send CONDITIONAL GET
+            // If-Modified-Since the date that we cached it
+            sprintf(buffer,"GET %s HTTP/1.1\r\nHost: %s\r\nIf-Modified-Since: %s\r\nConnection: close\r\n\r\n", url_path, url_host, datetime);
+
+        } else {
+            sprintf(buffer,"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", url_path, url_host);
+        }
+
+request:
+        // send the request to remote host
+        n = send(rsockfd, buffer, strlen(buffer), 0);
+
+        if(n < 0)
+        {
+            perror("failed to write to remote socket");
+            goto end;
+        }
+
+do_cache:
+        // Cache the requested website for later uses
+        cfd = -1;
+
+        do
+        {
+            bzero((char*)buffer, 4096);
+
+            // recieve from remote host
+            n = recv(rsockfd, buffer, 4096, 0);
+            // if we have read anything - otherwise END-OF-FILE
+            if(n > 0)
+            {
+                if(cfd == -1)
+                {
+                    float ver;
+                    sscanf(buffer, "HTTP/%f %d", &ver, &response_code);
+
+                    // if it is not 304 -- anything other than sub-CASE32
+                    if(response_code != 304)
+                    {
+                        // create the cache-file to save the content
+                        sprintf(filepath, "./cache/%s", url_encoded);
+                        if((cfd = open(filepath, O_RDWR|O_TRUNC|O_CREAT, S_IRWXU)) < 0)
+                        {
+                            perror("failed to create cache file");
+                            goto end;
+                        }
+                    } else {
+                        // send the response to the browser from local cache
+                        goto from_cache;
+                    }
+                }
+
+                // write to file
+                write(cfd, buffer, n);
+            }
+        } while(n > 0);
+        close(cfd);
+
+from_cache:
+
+        // Cache found, read from cache file
+        sprintf(filepath, "./cache/%s", url_encoded);
+        if((cfd = open (filepath, O_RDONLY)) < 0)
+        {
+            perror("failed to open cache file");
+            goto end;
+        }
+        do
+        {
+            bzero((char*)buffer, 4096);
+            n = read(cfd, buffer, 4096);
+            if(n > 0)
+            {
+                // send it to the browser
+                send(newsockfd, buffer, n, 0);
+            }
+        } while(n > 0);
+        close(cfd);
+
+end:
+        // closing sockets!
+        close(rsockfd);
+        close(newsockfd);
+        close(sockfd);
+        return 0;
+    } else {
+        // closing socket
+        close(newsockfd);
+        // loop...
+        goto accepting;
+    }
+
+    close(sockfd);
+    return 0;
 }
-       
