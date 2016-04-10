@@ -242,10 +242,10 @@ int main(int argc, char* argv[]){
 
      
 		sprintf(buf,"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", urlPath, urlHost);
-		puts(buf);
+		
 
    		req = send(remoteSock, buf, strlen(buf), flags);
-    
+    printf("%s", buf);
   	    if(req < 0) {
      	   perror("failed to write to remote socket");
     	    close(newSocket);
@@ -253,19 +253,25 @@ int main(int argc, char* argv[]){
   		    exit(0);
   	    }
   	   
-  	    
-        do{
-        	bzero((char*)buf,4096);
-        	req = recv(remoteSock, buf, 4096, 0);
-        	if(req > 0 ){
-        	   
-                    recv(remoteSock, buf, strlen(buf), flags);
-        	} else { 
-        		perror("Connection has closed");
-        	  	exit(1);
-        	  }
+        while(req > 0){
+        	bzero((char*)buf,8192);
+        	req = recv(remoteSock, buf, 8192, 0);
+			puts(buf);
+			if (req == 0) break;
+      //   	if(req > 0){
+      //          req = recv(remoteSock, buf, strlen(buf), flags);
+			   // puts(buf);
+      //   	} else { 
+      //   		puts("HELLO");
+      //   		perror("Connection has closed");
+      //   	  	exit(1);
+      //   	  }
 
-        }while(req > 0);
+        };
+        if (req == 0) {
+	  		perror("Connection has closed");
+	  	  	exit(1);
+        }
         
         
         if (!fork()) { // this is the child process
