@@ -1,3 +1,5 @@
+Ran by command:
+./proxyFilter PORT FILTER_LIST.txt
 
-Put any comments for the markers in this file. If you don't have any comments you can delete the file from your repo.
-
+Use another terminal:
+nc -v localhost 8000
